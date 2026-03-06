@@ -34,9 +34,10 @@ final class DownloadAssets {
             AssetsIndex.Asset asset = entry.getValue();
             String assetDest = getAssetDest(asset.hash);
             File file = new File(objectsDir, assetDest);
-            if (file.exists()) {
-                Main.LOGGER.debug("Considering existing file with size " + file.length() + " for " + name);
-                if (file.length() == asset.size) {
+            long fileLength = file.length();
+            if (fileLength > 0) {
+                Main.LOGGER.debug("Considering existing file with size " + fileLength + " for " + name);
+                if (fileLength == asset.size) {
                     Main.LOGGER.debug("Size check succeeded. Skipping.");
                     continue;
                 }
@@ -64,9 +65,8 @@ final class DownloadAssets {
 
     private static File downloadIndex(MinecraftVersion versionJson, File assetsDir) {
         File index = new File(assetsDir, "indexes/" + versionJson.assetIndex.id + ".json");
-        if (index.exists() && index.length() == versionJson.assetIndex.size) {
+        if (index.length() == versionJson.assetIndex.size)
             return index;
-        }
 
         if (!index.getParentFile().getAbsoluteFile().exists() && !index.getParentFile().getAbsoluteFile().mkdirs())
             throw new IllegalArgumentException("Failed to create index directory: " + index.getParentFile());

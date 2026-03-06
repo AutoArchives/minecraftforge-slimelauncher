@@ -161,7 +161,7 @@ public final class Main {
             // we're looking for the first "--"
             int splitIdx = -1;
             for (int i = 0; i < args.length; i++) {
-                if (args[i].equals("--")) {
+                if ("--".equals(args[i])) {
                     splitIdx = i;
                     break;
                 }
