@@ -35,7 +35,7 @@ final class DownloadAssets {
             String assetDest = getAssetDest(asset.hash);
             File file = new File(objectsDir, assetDest);
             long fileLength = file.length();
-            if (fileLength > 0) {
+            if (fileLength != 0) {
                 Main.LOGGER.debug("Considering existing file with size " + fileLength + " for " + name);
                 if (fileLength == asset.size) {
                     Main.LOGGER.debug("Size check succeeded. Skipping.");
