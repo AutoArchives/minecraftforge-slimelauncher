@@ -25,6 +25,7 @@ import java.util.zip.ZipFile;
 
 public final class Main {
     static final Logger LOGGER = Logger.create();
+    private static final boolean DISABLE_ASSETS = Boolean.getBoolean("net.minecraftforge.launcher.skip.assets");
 
     public static void main(String[] args) throws Throwable {
         long start = System.currentTimeMillis();
@@ -113,7 +114,10 @@ public final class Main {
 
         LOGGER.info("Checking assets");
         byte indent = LOGGER.push();
-        DownloadAssets.download(assetsRepo, assets, versionJson);
+        if (DISABLE_ASSETS)
+            LOGGER.info("Skipping assets");
+        else
+            DownloadAssets.download(assetsRepo, assets, versionJson);
         LOGGER.pop(indent);
 
         LOGGER.info("Looking for main class: " + mainClass);
