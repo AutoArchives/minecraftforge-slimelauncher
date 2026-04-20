@@ -20,6 +20,7 @@ import java.io.InputStream;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -144,7 +145,7 @@ public final class Main {
     }
 
     private static MethodHandle findMainMethod(Class<?> main) {
-        MethodHandles.Lookup lookup = MethodHandles.lookup();
+        MethodHandles.Lookup lookup = findLookup();
         try {
             return lookup.findStatic(main, "main", MethodType.methodType(void.class, String[].class));
         } catch (IllegalAccessException e) {
@@ -153,13 +154,26 @@ public final class Main {
                 Method mtd = main.getDeclaredMethod("main", String[].class);
                 return lookup.unreflect(mtd);
             } catch (NoSuchMethodException | IllegalAccessException ex) {
-                IllegalStateException error = new IllegalStateException("Could not find main(String[]) in " + main.getName() + '!', e);
-                error.addSuppressed(e);
+                IllegalStateException error = new IllegalStateException("Could not find main(String[]) in " + main.getName() + "!\r\n" +
+                    "Try running with --add-opens java.base/java.lang.invoke=ALL-UNNAMED", e);
+                error.addSuppressed(ex);
                 throw error;
             }
         } catch (NoSuchMethodException e) {
             throw new IllegalStateException("Could not find main(String[]) in " + main.getName() + '!', e);
         }
+    }
+
+    private static MethodHandles.Lookup findLookup() {
+        // try and find the privileged lookup, this typically needs a command line argument but it **should** detect it from our Manifest
+        try {
+            Field field = MethodHandles.Lookup.class.getDeclaredField("IMPL_LOOKUP");
+            field.setAccessible(true);
+            return (MethodHandles.Lookup)field.get(null);
+        } catch (Exception ignored) {
+            // This is expected if we don't have --add-opens java.base/java.lang.invoke=net.minecraftforge.launcher
+        }
+        return MethodHandles.lookup();
     }
 
     private static final class Launcher {

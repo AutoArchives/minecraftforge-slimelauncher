@@ -1,0 +1,12 @@
+plugins {
+    id 'java'
+    alias libs.plugins.gradleutils
+    alias libs.plugins.licenser
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(9)
+
+license {
+    header = rootProject.file('LICENSE-header.txt')
+    newLine = false
+}
