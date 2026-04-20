@@ -20,6 +20,7 @@ import java.io.InputStream;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import java.lang.reflect.Method;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -121,13 +122,8 @@ public final class Main {
         LOGGER.pop(indent);
 
         LOGGER.info("Looking for main class: " + mainClass);
-        MethodHandle mainMethod;
-        try {
-            Class<?> main = Class.forName(mainClass);
-            mainMethod = MethodHandles.publicLookup().findStatic(main, "main", MethodType.methodType(void.class, String[].class));
-        } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException e) {
-            throw new IllegalStateException("Could not find main class!", e);
-        }
+        Class<?> main = findMainClass(mainClass);
+        MethodHandle mainMethod = findMainMethod(main);
 
         LOGGER.info("Sanitizing Minecraft arguments");
         for (int i = 0; i < split.mc.length; i++) {
@@ -137,6 +133,33 @@ public final class Main {
         }
 
         return new Launcher(mainClass, mainMethod, split.mc);
+    }
+
+    private static Class<?> findMainClass(String mainClass) {
+        try {
+            return Class.forName(mainClass);
+        } catch (ClassNotFoundException e) {
+            throw new IllegalStateException("Could not find main class!", e);
+        }
+    }
+
+    private static MethodHandle findMainMethod(Class<?> main) {
+        MethodHandles.Lookup lookup = MethodHandles.lookup();
+        try {
+            return lookup.findStatic(main, "main", MethodType.methodType(void.class, String[].class));
+        } catch (IllegalAccessException e) {
+            // Old versions of the bootstrap lib didn't export the class, so lets try with some basic reflection
+            try {
+                Method mtd = main.getDeclaredMethod("main", String[].class);
+                return lookup.unreflect(mtd);
+            } catch (NoSuchMethodException | IllegalAccessException ex) {
+                IllegalStateException error = new IllegalStateException("Could not find main(String[]) in " + main.getName() + '!', e);
+                error.addSuppressed(e);
+                throw error;
+            }
+        } catch (NoSuchMethodException e) {
+            throw new IllegalStateException("Could not find main(String[]) in " + main.getName() + '!', e);
+        }
     }
 
     private static final class Launcher {
