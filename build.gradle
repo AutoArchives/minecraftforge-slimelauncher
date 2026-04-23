@@ -32,6 +32,7 @@ dependencies {
 
     implementation libs.gson
     implementation libs.jopt
+    implementation libs.srgutils
 
     implementation libs.bundles.utils
 }
@@ -83,6 +84,7 @@ tasks.named('shadowJar', ShadowJar) {
     relocate 'com.google.errorprone.annotations', 'net.minecraftforge.launcher.shadow.errorprone'
     relocate 'com.google.gson', 'net.minecraftforge.launcher.shadow.gson'
     relocate 'net.minecraftforge.util', 'net.minecraftforge.launcher.shadow.util'
+    relocate 'net.minecraftforge.srgutils', 'net.minecraftforge.launcher.shadow.srgutils'
     // Rewrite JOpt's message files, so that help text is displayed nicely.
     transform(com.github.jengelman.gradle.plugins.shadow.transformers.PropertiesFileTransformer) {
         paths = [ 'Messages.properties$' ]
@@ -103,6 +105,7 @@ publishing {
 
     publications.register('mavenJava', MavenPublication) {
         from components.shadow
+        artifact sourcesJar
 
         changelog.publish(it)
         gradleutils.promote(it)

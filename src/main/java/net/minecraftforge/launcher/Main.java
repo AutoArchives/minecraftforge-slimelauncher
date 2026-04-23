@@ -8,8 +8,10 @@ import joptsimple.AbstractOptionSpec;
 import joptsimple.ArgumentAcceptingOptionSpec;
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
+import net.minecraftforge.srgutils.IMappingFile;
 import net.minecraftforge.util.data.json.JsonData;
 import net.minecraftforge.util.data.json.MinecraftVersion;
+import net.minecraftforge.util.hash.HashFunction;
 import net.minecraftforge.util.logging.Logger;
 
 import java.io.File;
@@ -22,6 +24,8 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Locale;
+import java.util.function.Supplier;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -52,7 +56,7 @@ public final class Main {
         launcher.run();
     }
 
-    private static Launcher run(String[] args) throws Throwable {
+    private static Launcher run(String[] rawArgs) throws Throwable {
         OptionParser parser = new OptionParser();
         parser.allowsUnrecognizedOptions();
 
@@ -86,12 +90,25 @@ public final class Main {
             .accepts("main", "The main class to run")
             .withRequiredArg().ofType(String.class);
 
+        ArgumentAcceptingOptionSpec<File> toObfO = parser
+            .accepts("to-obf", "Mapping file containing mapped to obfuscated names")
+            .withRequiredArg().ofType(File.class);
+        ArgumentAcceptingOptionSpec<File> toSrgO = parser
+            .accepts("to-srg", "Mapping file containing mapped to SRG names")
+            .withRequiredArg().ofType(File.class);
+
+        ArgumentAcceptingOptionSpec<String> sideO = parser
+            .accepts("launcher-side", "The 'side' to launch, `client|server`. If `server`, asset downloading, natives, and other features will be skipped")
+            .withRequiredArg().ofType(String.class);
+
         Package pkg = Main.class.getPackage();
         LOGGER.info(pkg.getImplementationTitle() + " " + pkg.getImplementationVersion());
 
-        SplitArgs split = new SplitArgs(args);
+        SplitArgs _split = new SplitArgs(rawArgs);
+        String[] slArgs = _split.sl;
+        String[] mcArgs = _split.mc;
 
-        OptionSet options = parser.parse(split.sl);
+        OptionSet options = parser.parse(slArgs);
         if (options.has(helpO)) {
             parser.printHelpOn(LOGGER.getInfo());
             LOGGER.info("To pass arguments into the main class,\n" +
@@ -106,6 +123,17 @@ public final class Main {
         // TODO [SlimeLauncher][Jonathing] CHANGE THIS TO DIR! It is already extracted by FG7!
         File metadataZip = options.valueOf(metadataZip0);
         String mainClass = options.valueOf(mainClassO);
+        File toObf = options.valueOf(toObfO);
+        File toSrg = options.valueOf(toSrgO);
+
+        boolean isLegacyDev = LegacyDev.is(mainClass);
+        if (isLegacyDev)
+            mcArgs = LegacyDev.enhanceArgs(mainClass, mcArgs);
+
+        boolean isClient = detectClientSide(options.valueOf(sideO), mainClass, mcArgs);
+
+        if (isLegacyDev)
+            mainClass = LegacyDev.getMainClass();
 
         MinecraftVersion versionJson;
         try (ZipFile zip = new ZipFile(metadataZip)) {
@@ -114,26 +142,50 @@ public final class Main {
             );
         }
 
-        LOGGER.info("Checking assets");
-        byte indent = LOGGER.push();
-        if (DISABLE_ASSETS)
-            LOGGER.info("Skipping assets");
-        else
-            DownloadAssets.download(assetsRepo, assets, versionJson);
-        LOGGER.pop(indent);
+        if (isClient) {
+            DownloadAssets.checkAssets(assetsRepo, assets, versionJson, DISABLE_ASSETS);
+            LegacyDev.setupNatives(versionJson, new File(cache, "natives"));
+        }
+
+        if (toObf != null && toSrg != null) {
+            String hashObf = HashFunction.sha1().hash(toObf);
+            String hashSrg = HashFunction.sha1().hash(toSrg);
+            String hash = HashFunction.sha1().hash(hashObf + hashSrg);
+            File dir = new File(cache, "mappings/srgs/" + hash);
+            if (!dir.exists())
+                dir.mkdirs();
+
+            // We need to build the files like old FG did: https://github.com/MinecraftForge/ForgeGradle/blob/FG_2.3/src/main/resources/net/minecraftforge/gradle/GradleStartCommon.java#L61
+
+            IMappingFile toObfMap = IMappingFile.load(toObf); // m->o
+            IMappingFile toSrgMap = IMappingFile.load(toSrg); // m->s
+            System.setProperty("net.minecraftforge.gradle.GradleStart.srgDir", dir.getCanonicalPath());
+            setup(new File(dir, "notch-srg.srg"), "notch-srg", () -> toObfMap.reverse().chain(toSrgMap));
+            setup(new File(dir, "notch-mcp.srg"), "notch-mcp", toObfMap::reverse);
+            setup(new File(dir, "srg-mcp.srg"), "srg-mcp", toSrgMap::reverse);
+            setup(new File(dir, "mcp-srg.srg"), "mcp-srg", () -> toSrgMap);
+            setup(new File(dir, "mcp-notch.srg"), "mcp-notch", () -> toObfMap);
+            //System.setProperty("net.minecraftforge.gradle.GradleStart.csvDir", CSV_DIR.getCanonicalPath());
+        }
 
         LOGGER.info("Looking for main class: " + mainClass);
         Class<?> main = findMainClass(mainClass);
         MethodHandle mainMethod = findMainMethod(main);
 
         LOGGER.info("Sanitizing Minecraft arguments");
-        for (int i = 0; i < split.mc.length; i++) {
-            split.mc[i] = split.mc[i]
+        for (int i = 0; i < mcArgs.length; i++) {
+            mcArgs[i] = mcArgs[i]
                 .replace("{asset_index}", versionJson.assetIndex.id)
                 .replace("{assets_root}", assets.getAbsolutePath());
         }
 
-        return new Launcher(mainClass, mainMethod, split.mc);
+        return new Launcher(mainClass, mainMethod, mcArgs);
+    }
+
+    private static void setup(File file, String name, Supplier<IMappingFile> map) throws IOException {
+        System.setProperty("net.minecraftforge.gradle.GradleStart.srg." + name, file.getCanonicalPath());
+        if (!file.exists())
+            map.get().write(file.toPath(), IMappingFile.Format.SRG);
     }
 
     private static Class<?> findMainClass(String mainClass) {
@@ -174,6 +226,27 @@ public final class Main {
             // This is expected if we don't have --add-opens java.base/java.lang.invoke=net.minecraftforge.launcher
         }
         return MethodHandles.lookup();
+    }
+
+    private static boolean detectClientSide(String arg, String mainClass, String[] mcArgs) {
+        if (arg != null) {
+            if ("client".equals(arg))
+                return true;
+            if ("server".equals(arg))
+                return true;
+            throw new IllegalArgumentException("Invalid --launcher-side argument: " + arg);
+        }
+
+        if (mainClass.toLowerCase(Locale.ENGLISH).contains("server"))
+            return false;
+
+        for (int x = 0; x < mcArgs.length; x++) {
+            if (mcArgs[x].startsWith("--launchTarget")) {
+                String value = mcArgs[x].indexOf('=') == 15 ? mcArgs[x].substring(16) : x < mcArgs.length - 1 ? mcArgs[x + 1] : null;
+                return value == null || !value.toLowerCase(Locale.ENGLISH).contains("server");
+            }
+        }
+        return true;
     }
 
     private static final class Launcher {

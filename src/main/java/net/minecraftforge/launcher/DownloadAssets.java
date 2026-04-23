@@ -9,12 +9,31 @@ import net.minecraftforge.util.data.json.JsonData;
 import net.minecraftforge.util.data.json.MinecraftVersion;
 import net.minecraftforge.util.download.DownloadUtils;
 import net.minecraftforge.util.hash.HashFunction;
+import net.minecraftforge.util.logging.Logger;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.Map;
 
 /** Handles downloading assets for Minecraft. */
 final class DownloadAssets {
+    static final Logger LOGGER = Main.LOGGER;
+
+    static void checkAssets(String repo, File assetsDir, MinecraftVersion versionJson, boolean forceSkip) {
+        if (forceSkip) {
+            LOGGER.info("Force Skipping assets");
+            return;
+        }
+
+        LOGGER.info("Checking assets");
+        byte indent = LOGGER.push();
+        try {
+            DownloadAssets.download(repo, assetsDir, versionJson);
+        } finally {
+            LOGGER.pop(indent);
+        }
+    }
+
     /**
      * Downloads assets for the given Minecraft version.
      *
@@ -36,19 +55,19 @@ final class DownloadAssets {
             File file = new File(objectsDir, assetDest);
             long fileLength = file.length();
             if (fileLength != 0) {
-                Main.LOGGER.debug("Considering existing file with size " + fileLength + " for " + name);
+                LOGGER.debug("Considering existing file with size " + fileLength + " for " + name);
                 if (fileLength == asset.size) {
-                    Main.LOGGER.debug("Size check succeeded. Skipping.");
+                    LOGGER.debug("Size check succeeded. Skipping.");
                     continue;
                 }
             }
 
             // We need to download assets? Release the log so the consumer is aware.
-            Main.LOGGER.release();
+            LOGGER.release();
             try {
                 Main.LOGGER.info("Downloading missing asset: " + name);
                 DownloadUtils.downloadFile(file, repo + assetDest);
-                String newSha1 = HashFunction.SHA1.sneakyHash(file);
+                String newSha1 = HashFunction.sha1().hash(file);
                 if (!newSha1.equals(asset.hash)) {
                     file.delete();
                     throw new IllegalStateException(String.format("Failed to verify asset %s. Expected %s got %s", name, asset.hash, newSha1));
@@ -77,9 +96,13 @@ final class DownloadAssets {
             throw new IllegalStateException("Failed to download assets index", e);
         }
 
-        String newSha1 = HashFunction.SHA1.sneakyHash(index);
-        if (!newSha1.equals(versionJson.assetIndex.sha1))
-            throw new IllegalStateException(String.format("Failed to verify assets index. Expected %s got %s", versionJson.assetIndex.sha1, newSha1));
+        try {
+            String newSha1 = HashFunction.sha1().hash(index);
+            if (!newSha1.equals(versionJson.assetIndex.sha1))
+                throw new IllegalStateException(String.format("Failed to verify assets index. Expected %s got %s", versionJson.assetIndex.sha1, newSha1));
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to verify assets index", e);
+        }
 
         return index;
     }
