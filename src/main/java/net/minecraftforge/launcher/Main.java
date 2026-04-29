@@ -32,6 +32,7 @@ import java.util.zip.ZipFile;
 public final class Main {
     static final Logger LOGGER = Logger.create();
     private static final boolean DISABLE_ASSETS = Boolean.getBoolean("net.minecraftforge.launcher.skip.assets");
+    private static final boolean DISABLE_COREMOD_SEARCH = Boolean.getBoolean("net.minecraftforge.launcher.skip.coremod.search");
 
     public static void main(String[] args) throws Throwable {
         long start = System.currentTimeMillis();
@@ -167,6 +168,9 @@ public final class Main {
             setup(new File(dir, "mcp-notch.srg"), "mcp-notch", () -> toObfMap);
             //System.setProperty("net.minecraftforge.gradle.GradleStart.csvDir", CSV_DIR.getCanonicalPath());
         }
+
+        if (!DISABLE_COREMOD_SEARCH)
+            FG2Hacks.searchCoremods(versionJson.id);
 
         LOGGER.info("Looking for main class: " + mainClass);
         Class<?> main = findMainClass(mainClass);
