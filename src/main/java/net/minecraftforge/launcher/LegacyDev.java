@@ -10,6 +10,7 @@ import joptsimple.OptionSet;
 import net.minecraftforge.util.data.json.MinecraftVersion;
 import net.minecraftforge.util.logging.Logger;
 import net.minecraftforge.util.os.OS;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -31,9 +32,15 @@ class LegacyDev {
     static final String LEGACYDEV = "net.minecraftforge.legacydev.";
     static final String LEGACYDEV_CLIENT = LEGACYDEV + "MainClient";
     static final String LEGACYDEV_SERVER = LEGACYDEV + "MainServer";
+    static final String USERDEV = "net.minecraftforge.userdev.";
+    static final String USERDEV_TESTING = USERDEV + "LaunchTesting";
 
     static boolean is(String main) {
         return main.startsWith(LEGACYDEV);
+    }
+
+    static boolean isUserDev(String main) {
+        return USERDEV_TESTING.equals(main);
     }
 
     static String getMainClass() {
@@ -136,18 +143,38 @@ class LegacyDev {
     /// Enhance the command line arguments like LegacyDev does
     /// This reads a lot of things from the environment because I was stupid when I originally designed Legacydev -Lex
     /// [Reference](https://github.com/MinecraftForge/LegacyDev/blob/master/src/main/java/net/minecraftforge/legacydev/Main.java#L81)
+    @SuppressWarnings("DataFlowIssue") // Maps can have null values but IDEA yells about it
     static String[] enhanceArgs(String mainClass, String[] existing) {
         LOGGER.info("Enhancing Arguments");
         LOGGER.push();
         try {
+            boolean isClient = LEGACYDEV_CLIENT.equals(mainClass);
             Map<String, String> values = new HashMap<>();
+            if (isUserDev(mainClass)) {
+                // We just need to find the launch target from the args
+                // https://github.com/MinecraftForge/MinecraftForge/blob/2bfa53b05a1482255844807e52875d6c03dc48d0/src/userdev/java/net/minecraftforge/userdev/LaunchTesting.java#L38
+                Map<String, String> tmp = new HashMap<>();
+                tmp.put("launchTarget", getenv("target"));
+                processArgs(values, existing);
+                String target = tmp.get("launchTarget");
+                if (target != null && target.contains("client"))
+                    isClient = true;
+
+                values.put("gameDir", ".");
+                values.put("launchTarget", getenv("target"));
+                values.put("fml.mcpVersion", getenv("MCP_VERSION"));
+                values.put("fml.mcVersion", getenv("MC_VERSION"));
+                values.put("fml.forgeGroup", getenv("FORGE_GROUP"));
+                values.put("fml.forgeVersion", getenv("FORGE_VERSION"));
+            }
+
             String tweak = getenv("tweakClass");
             if (tweak != null && !tweak.isEmpty()) {
                 LOGGER.info("tweakClass: " + tweak);
                 values.put("tweakClass", tweak);
             }
 
-            if (LEGACYDEV_CLIENT.equals(mainClass)) {
+            if (isClient) {
                 LOGGER.info("version:    " + getenv("MC_VERSION"));
                 values.put("version", getenv("MC_VERSION"));
                 values.put("assetIndex", "{asset_index}");
@@ -158,23 +185,7 @@ class LegacyDev {
                 values.put("password", null);
             }
 
-            final OptionParser parser = new OptionParser();
-            parser.allowsUnrecognizedOptions();
-
-            for (String key : values.keySet())
-                parser.accepts(key).withRequiredArg().ofType(String.class);
-
-            final NonOptionArgumentSpec<String> nonOption = parser.nonOptions();
-
-            final OptionSet options = parser.parse(existing);
-            for (String key : values.keySet()) {
-                if (options.hasArgument(key)) {
-                    String value = (String) options.valueOf(key);
-                    values.put(key, value);
-                }
-            }
-
-            List<String> extras = new ArrayList<>(nonOption.values(options));
+            List<String> extras = processArgs(values, existing);
             LOGGER.info("Extra:     " + extras);
 
             List<String> lst = new ArrayList<>(values.size() * 2 + extras.size());
@@ -185,18 +196,38 @@ class LegacyDev {
                 lst.add(entry.getValue());
             }
             lst.addAll(extras);
-            return lst.toArray(new String[lst.size()]);
+            return lst.toArray(new String[0]);
         } finally {
             LOGGER.pop();
         }
     }
 
-    private static String getenv(String name) {
+    private static List<String> processArgs(Map<String, String> values, String[] args) {
+        final OptionParser parser = new OptionParser();
+        parser.allowsUnrecognizedOptions();
+
+        for (String key : values.keySet())
+            parser.accepts(key).withRequiredArg().ofType(String.class);
+
+        final NonOptionArgumentSpec<String> nonOption = parser.nonOptions();
+
+        final OptionSet options = parser.parse(args);
+        for (String key : values.keySet()) {
+            if (options.hasArgument(key)) {
+                String value = (String) options.valueOf(key);
+                values.put(key, value);
+            }
+        }
+
+        return new ArrayList<>(nonOption.values(options)); // extras
+    }
+
+    private static @Nullable String getenv(String name) {
         String value = System.getenv(name);
         return value == null || value.isEmpty() ? null : value;
     }
 
-    private static boolean nullOrEmpty(String value) {
+    private static boolean nullOrEmpty(@Nullable String value) {
         return value == null || value.isEmpty();
     }
 }

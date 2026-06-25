@@ -127,14 +127,20 @@ public final class Main {
         File toObf = options.valueOf(toObfO);
         File toSrg = options.valueOf(toSrgO);
 
+        LOGGER.info("Main Class: " + mainClass);
         boolean isLegacyDev = LegacyDev.is(mainClass);
-        if (isLegacyDev)
+        boolean isUserDev = LegacyDev.isUserDev(mainClass);
+        if (isLegacyDev || isUserDev)
             mcArgs = LegacyDev.enhanceArgs(mainClass, mcArgs);
 
         boolean isClient = detectClientSide(options.valueOf(sideO), mainClass, mcArgs);
 
         if (isLegacyDev)
             mainClass = LegacyDev.getMainClass();
+        else if (isUserDev) { // This is only used for 1.14->1.16, and only ever targeted cpw.mods.modlauncher.Launcher
+            mainClass = "cpw.mods.modlauncher.Launcher";
+            LOGGER.info("Overwriting Main Class: " + mainClass);
+        }
 
         MinecraftVersion versionJson;
         try (ZipFile zip = new ZipFile(metadataZip)) {
